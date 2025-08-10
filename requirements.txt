@@ -1,0 +1,6 @@
+# Workflow Agent - Essential packages only
+langchain==0.1.17
+langchain-community==0.0.37
+langchain-core==0.1.52
+pandas==2.2.1
+openpyxl==3.1.2

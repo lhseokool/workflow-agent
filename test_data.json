@@ -1,0 +1,61 @@
+[
+    {
+      "instruction": "(CodeWriterAgent)로 코드를 작성한 후, (CodeReviewerAgent)로 점검하고 (CodeRefactorAgent)로 리팩토링하는 멀티 에이전트를 구성하세요.",
+      "label_adk": "Sequential([CodeWriterAgent, CodeReviewerAgent, CodeRefactorAgent])",
+      "label_json": {
+        "type": "Sequential",
+        "sub_agents": [
+          { "name": "CodeWriterAgent" },
+          { "name": "CodeReviewerAgent" },
+          { "name": "CodeRefactorAgent" }
+        ]
+      }
+    },
+    {
+        "instruction": "(InitialWriterAgent)로 초기 문서를 작성한 후, (CriticAgent)와 (RefinerAgent)를 최대 5회 반복 실행하여 문서를 개선하거나 종료하세요.",
+        "label_adk": "Loop([CriticAgent, RefinerAgent], max_iterations=5, initial_agent=InitialWriterAgent)",
+        "label_json": {
+          "type": "Loop",
+          "sub_agents": [
+            { "name": "InitialWriterAgent" },
+            { "name": "CriticAgent" },
+            { "name": "RefinerAgent" }
+          ]
+        }
+      },
+    {
+      "instruction": "(PreAmendmentFinanceAgent)와 (PostAmendmentFinanceAgent)를 동시에 사용하여 법률 개정 전후의 조항을 비교하세요.",
+      "label_adk": "Parallel([PreAmendmentFinanceAgent, PostAmendmentFinanceAgent])",
+      "label_json": {
+        "type": "Parallel",
+        "sub_agents": [
+          { "name": "PreAmendmentFinanceAgent" },
+          { "name": "PostAmendmentFinanceAgent" }
+        ]
+      }
+    },
+    {
+      "instruction": "(HealthCheckConsultingAgent)로 건강 상태를 분석하고, (ActivityLogConsultingAgent)로 활동 로그를 점검한 후, (InsuranceRecommendationAgent)로 적합한 보험을 추천하세요.",
+      "label_adk": "Sequential([HealthCheckConsultingAgent, ActivityLogConsultingAgent, InsuranceRecommendationAgent])",
+      "label_json": {
+        "type": "Sequential",
+        "sub_agents": [
+          { "name": "HealthCheckConsultingAgent" },
+          { "name": "ActivityLogConsultingAgent" },
+          { "name": "InsuranceRecommendationAgent" }
+        ]
+      }
+    },
+    {
+      "instruction": "(KoreaEquipmentSafetyAgent), (JapanEquipmentSafetyAgent), (ChinaEquipmentSafetyAgent)를 동시에 사용하여 각국의 안전 규정을 비교하세요.",
+      "label_adk": "Parallel([KoreaEquipmentSafetyAgent, JapanEquipmentSafetyAgent, ChinaEquipmentSafetyAgent])",
+      "label_json": {
+        "type": "Parallel",
+        "sub_agents": [
+          { "name": "KoreaEquipmentSafetyAgent" },
+          { "name": "JapanEquipmentSafetyAgent" },
+          { "name": "ChinaEquipmentSafetyAgent" }
+        ]
+      }
+    }
+  ]
