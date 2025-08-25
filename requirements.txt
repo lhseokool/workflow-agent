@@ -2,5 +2,7 @@
 langchain==0.1.17
 langchain-community==0.0.37
 langchain-core==0.1.52
+langgraph>=0.2.0
+pydantic>=2.0.0
 pandas==2.2.1
 openpyxl==3.1.2

@@ -19,32 +19,60 @@ def load_test_data(file_path: str = "test_data.json") -> List[Dict[str, Any]]:
         return []
 
 
-def compare_results_exact(expected: Dict[str, Any], actual: Dict[str, Any]) -> Dict[str, bool]:
-    """Compare results using exact matching"""
-    # ADK comparison
-    adk_match = expected.get("label_adk") == actual.get("label_adk")
+def compare_json_workflows(expected_json: Dict[str, Any], actual_json: Dict[str, Any]) -> bool:
+    """Compare two JSON workflow structures for semantic equality"""
+    # Check flow_name
+    if expected_json.get("flow_name") != actual_json.get("flow_name"):
+        return False
     
-    # JSON type comparison
+    # Check type
+    if expected_json.get("type") != actual_json.get("type"):
+        return False
+    
+    # Check sub_agents
+    expected_agents = expected_json.get("sub_agents", [])
+    actual_agents = actual_json.get("sub_agents", [])
+    
+    if len(expected_agents) != len(actual_agents):
+        return False
+    
+    for exp_agent, act_agent in zip(expected_agents, actual_agents):
+        if "agent_name" in exp_agent and "agent_name" in act_agent:
+            if exp_agent["agent_name"] != act_agent["agent_name"]:
+                return False
+        elif "flow" in exp_agent and "flow" in act_agent:
+            if not compare_json_workflows(exp_agent["flow"], act_agent["flow"]):
+                return False
+        else:
+            return False
+    
+    # Check tools (for LLM type)
+    if expected_json.get("type") == "LLM":
+        expected_tools = expected_json.get("tools", [])
+        actual_tools = actual_json.get("tools", [])
+        
+        if len(expected_tools) != len(actual_tools):
+            return False
+        
+        expected_tool_names = {tool["agent_name"] for tool in expected_tools}
+        actual_tool_names = {tool["agent_name"] for tool in actual_tools}
+        
+        if expected_tool_names != actual_tool_names:
+            return False
+    
+    return True
+
+
+def compare_results_exact(expected: Dict[str, Any], actual: Dict[str, Any]) -> Dict[str, bool]:
+    """Compare results using exact matching for JSON workflows"""
     expected_json = expected.get("label_json", {})
     actual_json = actual.get("label_json", {})
-    type_match = expected_json.get("type") == actual_json.get("type")
     
-    # Agent comparison
-    expected_agents = set()
-    actual_agents = set()
-    
-    if "sub_agents" in expected_json:
-        expected_agents = {agent["name"] for agent in expected_json["sub_agents"]}
-    if "sub_agents" in actual_json:
-        actual_agents = {agent["name"] for agent in actual_json["sub_agents"]}
-    
-    agents_match = expected_agents == actual_agents
-    json_match = type_match and agents_match
+    json_match = compare_json_workflows(expected_json, actual_json)
     
     return {
-        "adk_match": adk_match,
         "json_match": json_match,
-        "exact_match": adk_match and json_match
+        "exact_match": json_match
     }
 
 
@@ -54,22 +82,25 @@ def parse_llm_evaluation(eval_result: str) -> bool:
     return result == "true"
 
 
-def save_to_excel(results: List[Dict[str, Any]], prefix: str = "combined") -> str:
-    """Save results to Excel file with both exact and LLM evaluation results"""
+def save_to_excel(results: List[Dict[str, Any]], prefix: str = "json_workflow") -> str:
+    """Save results to Excel file with JSON workflow evaluation results"""
     try:
         excel_data = []
         for r in results:
             row = {
                 "Test_ID": r["test_id"],
                 "Instruction": r["instruction"],
-                "Expected_ADK": r["expected_adk"],
-                "Generated_ADK": r["actual_adk"],
                 "Expected_JSON": r["expected_json"],
                 "Generated_JSON": r["actual_json"],
-                "ADK_Exact_Match": "O" if r["adk_match"] else "X",
-                "ADK_LLM_Correct": "O" if r.get("adk_llm_correct", False) else "X",
-                "JSON_Exact_Match": "O" if r["json_match"] else "X", 
+                "JSON_Exact_Match": "O" if r["json_match"] else "X",
                 "JSON_LLM_Correct": "O" if r.get("json_llm_correct", False) else "X",
+                "Pydantic_Type_Valid": "O" if r.get("pydantic_valid", False) else "X",
+                "LLM_Semantic_Valid": "O" if r.get("llm_validation_score", False) else "X",
+                "Generation_Success": "O" if r.get("success", True) else "X",
+                "Retry_Count": r.get("retry_count", 0),
+                "Parsing_Method": r.get("parsing_method", "unknown"),
+                "Pydantic_Error_Type": r.get("pydantic_error_type", ""),
+                "Validation_Feedback": r.get("validation_feedback", ""),
                 "Total_Time": f"{r['elapsed_time']:.2f}s",
                 "LLM_Eval_Time": f"{r.get('llm_eval_time', 0):.2f}s"
             }
@@ -104,7 +135,7 @@ def save_to_excel(results: List[Dict[str, Any]], prefix: str = "combined") -> st
 
 
 def print_results_summary(results: List[Dict[str, Any]]):
-    """Print test results summary with both exact and LLM evaluation metrics"""
+    """Print test results summary with JSON workflow evaluation metrics"""
     total_tests = len(results)
     if total_tests == 0:
         print("❌ No test results available.")
@@ -114,21 +145,54 @@ def print_results_summary(results: List[Dict[str, Any]]):
     avg_llm_time = sum(r.get("llm_eval_time", 0) for r in results) / total_tests
     
     # Calculate metrics
-    adk_exact = sum(1 for r in results if r["adk_match"])
-    adk_llm = sum(1 for r in results if r.get("adk_llm_correct", False))
     json_exact = sum(1 for r in results if r["json_match"])
     json_llm = sum(1 for r in results if r.get("json_llm_correct", False))
+    generation_success = sum(1 for r in results if r.get("success", True))
+    pydantic_valid = sum(1 for r in results if r.get("pydantic_valid", False))
+    llm_semantic_valid = sum(1 for r in results if r.get("llm_validation_score", False))
+    total_retries = sum(r.get("retry_count", 0) for r in results)
+    avg_retries = total_retries / total_tests if total_tests > 0 else 0
     
-    print(f"\n{'='*60}")
-    print(f"📊 Test Results Summary (Combined Evaluation)")
-    print(f"{'='*60}")
+    # Error type breakdown
+    error_types = {}
+    parsing_methods = {}
+    for r in results:
+        error_type = r.get("pydantic_error_type", "")
+        if error_type and not r.get("pydantic_valid", False):
+            error_types[error_type] = error_types.get(error_type, 0) + 1
+        
+        # Parsing method breakdown
+        parsing_method = r.get("parsing_method", "unknown")
+        parsing_methods[parsing_method] = parsing_methods.get(parsing_method, 0) + 1
+    
+    print(f"\n{'='*80}")
+    print(f"📊 Test Results Summary (Pydantic + LLM + LangGraph Evaluation)")
+    print(f"{'='*80}")
     print(f"Total Tests: {total_tests}")
-    print(f"\nADK Results:")
-    print(f"  Exact Match: {adk_exact}/{total_tests} ({adk_exact/total_tests*100:.1f}%)")
-    print(f"  LLM Correct: {adk_llm}/{total_tests} ({adk_llm/total_tests*100:.1f}%)")
-    print(f"\nJSON Results:")
+    print(f"\nGeneration Results:")
+    print(f"  Successful Generation: {generation_success}/{total_tests} ({generation_success/total_tests*100:.1f}%)")
+    print(f"  Total Retries: {total_retries}")
+    print(f"  Average Retries per Test: {avg_retries:.1f}")
+    
+    print(f"\nValidation Results:")
+    print(f"  1️⃣ Pydantic Type Valid: {pydantic_valid}/{total_tests} ({pydantic_valid/total_tests*100:.1f}%)")
+    print(f"  2️⃣ LLM Semantic Valid: {llm_semantic_valid}/{total_tests} ({llm_semantic_valid/total_tests*100:.1f}%)")
+    
+    print(f"\nComparison Results:")
     print(f"  Exact Match: {json_exact}/{total_tests} ({json_exact/total_tests*100:.1f}%)")
     print(f"  LLM Correct: {json_llm}/{total_tests} ({json_llm/total_tests*100:.1f}%)")
+    
+    if error_types:
+        print(f"\nPydantic Error Breakdown:")
+        for error_type, count in error_types.items():
+            print(f"  {error_type}: {count} cases")
+    
+    print(f"\nParsing Method Usage:")
+    for method, count in parsing_methods.items():
+        percentage = count/total_tests*100 if total_tests > 0 else 0
+        icon = "🏗️" if method == "structured" else "📝" if method == "string" else "❌"
+        print(f"  {icon} {method}: {count}/{total_tests} ({percentage:.1f}%)")
+    
     print(f"\nTiming:")
     print(f"  Average Total Time: {avg_time:.2f}s")
     print(f"  Average LLM Eval Time: {avg_llm_time:.2f}s")

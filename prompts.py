@@ -3,59 +3,38 @@ Workflow Agent Prompts
 Template prompts for ADK and JSON generation and evaluation
 """
 
-# ADK Generation Prompt
-ADK_PROMPT = """
-Convert this instruction to ADK notation. Return ONLY the ADK string.
-
-Patterns:
-- Sequential([Agent1, Agent2]) - for step-by-step execution
-- Parallel([Agent1, Agent2]) - for simultaneous execution  
-- Loop([Agent1, Agent2], max_iterations=N, initial_agent=InitialAgent) - for repetitive execution
-
-Keywords:
-- Sequential: "한 후", "다음에", "그 다음", "after", "then", "next"
-- Parallel: "동시에", "함께", "병렬로", "simultaneously", "together", "at the same time"
-- Loop: "반복", "최대", "회", "repeatedly", "up to", "times"
-
-Examples:
-Input: "(CodeWriterAgent)로 코드를 작성한 후, (CodeReviewerAgent)로 점검하세요."
-Output: Sequential([CodeWriterAgent, CodeReviewerAgent])
-
-Input: "(AgentA)와 (AgentB)를 동시에 사용하세요."
-Output: Parallel([AgentA, AgentB])
-
-Input: "(InitialAgent)로 시작하고, (AgentA)와 (AgentB)를 최대 3회 반복하세요."
-Output: Loop([AgentA, AgentB], max_iterations=3, initial_agent=InitialAgent)
-
-Instruction: {instruction}
-ADK:"""
+# ADK Generation Prompt - REMOVED (No longer used)
 
 # JSON Generation Prompt
 JSON_PROMPT = """
-Convert instruction to JSON. Return ONLY the JSON object, nothing else.
+Convert instruction to workflow JSON. Return ONLY the JSON object, nothing else.
 Do not include any explanations, prefixes, or additional text.
 
-Examples:
-Input: "(CodeWriterAgent)로 코드를 작성한 후, (CodeReviewerAgent)로 점검하세요."
-Output: {{"type": "Sequential", "sub_agents": [{{"name": "CodeWriterAgent"}}, {{"name": "CodeReviewerAgent"}}]}}
+You must create one of these 4 types of workflows:
 
-Input: "(AgentA)와 (AgentB)를 동시에 사용하세요."
-Output: {{"type": "Parallel", "sub_agents": [{{"name": "AgentA"}}, {{"name": "AgentB"}}]}}
+1. LLM type (for Q&A or assistance tasks with main agent + tool agents):
+{{"flow_name": "FlowName", "type": "LLM", "sub_agents": [{{"agent_name": "MainAgent"}}], "tools": [{{"agent_name": "ToolAgent1"}}, {{"agent_name": "ToolAgent2"}}]}}
+
+2. Sequential type (for step-by-step execution):
+{{"flow_name": "FlowName", "type": "Sequential", "sub_agents": [{{"agent_name": "Agent1"}}, {{"agent_name": "Agent2"}}]}}
+
+3. Sequential with Loop (for iterative refinement):
+{{"flow_name": "FlowName", "type": "Sequential", "sub_agents": [{{"agent_name": "InitialAgent"}}, {{"flow": {{"flow_name": "LoopName", "type": "Loop", "sub_agents": [{{"agent_name": "CriticAgent"}}, {{"agent_name": "RefineAgent"}}]}}}}]}}
+
+4. Sequential with Parallel (for complex business processes):
+{{"flow_name": "FlowName", "type": "Sequential", "sub_agents": [{{"flow": {{"flow_name": "ParallelName", "type": "Parallel", "sub_agents": [{{"agent_name": "Agent1"}}, {{"agent_name": "Agent2"}}, {{"agent_name": "Agent3"}}]}}}}, {{"agent_name": "SynthesisAgent"}}]}}
+
+Guidelines:
+- Use LLM type for Q&A, support, help desk scenarios
+- Use Sequential for step-by-step processes
+- Use Loop within Sequential for iterative improvement
+- Use Parallel within Sequential for simultaneous work followed by synthesis
+- Agent names should end with "Agent" 
+- Flow names should be descriptive and end with appropriate suffixes
 
 Instruction: {instruction}"""
 
-# LLM-based ADK Evaluation Prompt
-ADK_EVALUATION_PROMPT = """
-Compare the generated ADK with the expected result for the given instruction.
-
-Original Instruction: {instruction}
-Expected ADK: {expected_adk}
-Generated ADK: {generated_adk}
-
-Does the generated ADK correctly represent the instruction intent and match the expected result?
-Consider: workflow pattern, agent names, execution order, and parameters.
-
-Return ONLY: True or False"""
+# ADK Evaluation Prompt - REMOVED (No longer used)
 
 # LLM-based JSON Evaluation Prompt
 JSON_EVALUATION_PROMPT = """

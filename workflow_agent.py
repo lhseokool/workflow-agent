@@ -1,6 +1,6 @@
 """
 Workflow Agent - Clean and Simple Implementation
-Automatically runs both exact and LLM evaluations for incoming data
+Automatically runs JSON workflow generation and evaluation
 """
 
 import json
@@ -10,9 +10,9 @@ from utils import load_test_data, compare_results_exact, save_to_excel, print_re
 
 
 def run_workflow_evaluation():
-    """Run combined exact and LLM evaluation on test data"""
+    """Run JSON workflow evaluation on test data"""
     print("🚀 Starting Workflow Agent Evaluation")
-    print("Running both exact match and LLM evaluation...")
+    print("Running JSON workflow generation and evaluation...")
     
     # Load test data
     test_data = load_test_data()
@@ -24,6 +24,7 @@ def run_workflow_evaluation():
     
     # Initialize agent
     agent = WorkflowAgent()
+    print(f"💡 Using {'structured output' if agent.use_structured_output else 'string parsing'} for JSON generation")
     results = []
     
     # Process each test case
@@ -41,13 +42,8 @@ def run_workflow_evaluation():
             # Exact match evaluation
             exact_comparison = compare_results_exact(test_case, workflow_result)
             
-            # LLM evaluation
+            # LLM evaluation (JSON only)
             llm_start_time = time.time()
-            adk_llm_correct = agent.evaluate_adk_with_llm(
-                instruction,
-                test_case.get("label_adk", ""),
-                workflow_result.get("label_adk", "")
-            )
             json_llm_correct = agent.evaluate_json_with_llm(
                 instruction,
                 json.dumps(test_case.get("label_json", {}), ensure_ascii=False),
@@ -60,27 +56,40 @@ def run_workflow_evaluation():
             result = {
                 "test_id": i + 1,
                 "instruction": instruction,
-                "expected_adk": test_case.get("label_adk", ""),
-                "actual_adk": workflow_result.get("label_adk", ""),
                 "expected_json": json.dumps(test_case.get("label_json", {}), ensure_ascii=False),
                 "actual_json": json.dumps(workflow_result.get("label_json", {}), ensure_ascii=False),
-                "adk_match": exact_comparison["adk_match"],
                 "json_match": exact_comparison["json_match"],
-                "adk_llm_correct": adk_llm_correct,
                 "json_llm_correct": json_llm_correct,
                 "elapsed_time": total_time,
-                "llm_eval_time": llm_eval_time
+                "llm_eval_time": llm_eval_time,
+                "retry_count": workflow_result.get("retry_count", 0),
+                "success": workflow_result.get("success", True),
+                "validation_feedback": workflow_result.get("validation_feedback", ""),
+                # Pydantic validation results
+                "pydantic_valid": workflow_result.get("pydantic_valid", False),
+                "pydantic_error_type": workflow_result.get("pydantic_error_type", ""),
+                "llm_validation_score": workflow_result.get("llm_validation_score", False),
+                "parsing_method": "structured" if agent.use_structured_output and workflow_result.get("pydantic_valid", False) else "string"
             }
             results.append(result)
             
             # Print progress
-            exact_adk = "✅" if exact_comparison["adk_match"] else "❌"
             exact_json = "✅" if exact_comparison["json_match"] else "❌"
-            llm_adk = "✅" if adk_llm_correct else "❌"
             llm_json = "✅" if json_llm_correct else "❌"
+            success_icon = "✅" if workflow_result.get("success", True) else "❌"
+            pydantic_icon = "✅" if workflow_result.get("pydantic_valid", False) else "❌"
+            llm_semantic_icon = "✅" if workflow_result.get("llm_validation_score", False) else "❌"
+            retry_info = f" (Retries: {workflow_result.get('retry_count', 0)})" if workflow_result.get('retry_count', 0) > 0 else ""
             
-            print(f"Results - ADK: {exact_adk}(exact) {llm_adk}(LLM) | JSON: {exact_json}(exact) {llm_json}(LLM)")
+            # Show parsing method used
+            parsing_method = "🏗️(structured)" if agent.use_structured_output and workflow_result.get("pydantic_valid", False) else "📝(string)"
+            
+            print(f"Results - JSON: {exact_json}(exact) {llm_json}(LLM) | Validation: {pydantic_icon}(type) {llm_semantic_icon}(semantic) {success_icon}(overall) {parsing_method}{retry_info}")
             print(f"Time: {total_time:.2f}s (Generation: {generation_time:.2f}s, Evaluation: {llm_eval_time:.2f}s)")
+            if workflow_result.get("validation_feedback"):
+                print(f"Feedback: {workflow_result['validation_feedback']}")
+            if workflow_result.get("pydantic_error_type") and workflow_result.get("pydantic_error_type") != "":
+                print(f"Type Error: {workflow_result['pydantic_error_type']}")
             
         except Exception as e:
             print(f"❌ Error processing test case: {e}")
@@ -88,16 +97,19 @@ def run_workflow_evaluation():
             results.append({
                 "test_id": i + 1,
                 "instruction": instruction,
-                "expected_adk": test_case.get("label_adk", ""),
-                "actual_adk": "",
                 "expected_json": json.dumps(test_case.get("label_json", {}), ensure_ascii=False),
                 "actual_json": "",
-                "adk_match": False,
                 "json_match": False,
-                "adk_llm_correct": False,
                 "json_llm_correct": False,
                 "elapsed_time": 0,
-                "llm_eval_time": 0
+                "llm_eval_time": 0,
+                "retry_count": 0,
+                "success": False,
+                "validation_feedback": f"Exception occurred: {str(e)}",
+                "pydantic_valid": False,
+                "pydantic_error_type": "exception",
+                "llm_validation_score": False,
+                "parsing_method": "error"
             })
     
     # Print summary and save results
