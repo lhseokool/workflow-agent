@@ -21,14 +21,20 @@ wheels/
 *.egg
 MANIFEST
 
-# Virtual environments
+# Virtual environments and environment files
 .env
+.env.local
+.env.production
 .venv
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# API Keys and secrets
+*.key
+api_key.txt
 
 # IDE
 .vscode/

@@ -1,14 +1,15 @@
 # Workflow Agent
 
-Clean and simple system for converting natural language instructions to ADK/JSON workflows with combined evaluation methods.
+Clean and efficient system for converting natural language instructions to JSON workflows using OpenAI models with dual evaluation methods.
 
 ## ✨ Features
 
-- **ADK Generation**: Convert instructions to `Sequential([Agent1, Agent2])` format
-- **JSON Generation**: Convert instructions to `{"type": "Sequential", "sub_agents": [...]}`
-- **Dual Evaluation**: Both exact match and LLM-based evaluation simultaneously
-- **Excel Export**: Automatic results saving with comprehensive metrics
-- **Clean Architecture**: Modular design with separated concerns
+- **OpenAI Integration**: Uses GPT-4o and GPT-4o-mini models
+- **JSON Generation**: Convert instructions to structured workflow JSON
+- **Triple Evaluation**: Exact match + LLM with GT + LLM-as-Judge (no GT)
+- **LLM-as-Judge**: Evaluate generation quality without ground truth
+- **Excel Export**: Comprehensive results with all evaluation metrics
+- **Clean Architecture**: Simple, modular, well-documented
 
 ## 🚀 Quick Start
 
@@ -16,47 +17,66 @@ Clean and simple system for converting natural language instructions to ADK/JSON
 # Install dependencies
 pip install -r requirements.txt
 
-# Install Ollama & download model
-ollama pull qwen3:4b
+# Method 1: Create .env file (Recommended)
+echo "OPENAI_API_KEY=your-api-key-here" > .env
+
+# Method 2: Set environment variable
+export OPENAI_API_KEY="your-api-key-here"
+
+# Method 3: Interactive setup
+python setup_api_key.py
 
 # Run full evaluation
 python workflow_agent.py
 
-# Run quick test
-python quick_test.py
+# Quick test
+python tests/quick_test.py
+
+# Demo without API key
+python demo_without_api.py
 ```
 
-## 🎯 Supported Patterns
+## 🎯 Supported Workflow Types
 
-1. **Sequential**: Step-by-step execution (`한 후`, `다음에`, `after`, `then`)
-2. **Parallel**: Simultaneous execution (`동시에`, `함께`, `simultaneously`, `together`)  
-3. **Loop**: Repetitive execution (`반복`, `최대 N회`, `repeatedly`, `up to N times`)
+1. **LLM**: Q&A and assistance tasks with tools
+2. **Sequential**: Step-by-step execution
+3. **Parallel**: Simultaneous execution
+4. **Loop**: Repetitive execution with iterations
 
 ## 📊 Usage Example
 
 ```python
 from models import WorkflowAgent
 
-agent = WorkflowAgent()
+# Use GPT-4o-mini (default) or GPT-4o
+agent = WorkflowAgent(model_name="gpt-4o-mini")
 result = agent.generate_workflow(
-    "(CodeWriterAgent)로 코드를 작성한 후, (CodeReviewerAgent)로 점검하세요."
+    "고객 문의에 답변하는 시스템을 만들어주세요"
 )
 
-print(result["label_adk"])    # Sequential([CodeWriterAgent, CodeReviewerAgent])
-print(result["label_json"])   # {"type": "Sequential", "sub_agents": [...]}
+print(result["label_json"])   # {"type": "LLM", "sub_agents": [...], "tools": [...]}
+
+# LLM-as-Judge evaluation (no GT needed)
+is_valid = agent.judge_instruction_result(
+    instruction,
+    json.dumps(result["label_json"])
+)
+print(f"Valid workflow: {is_valid}")
 ```
 
 ## 📁 Project Structure
 
 ```
 workflow_agent/
-├── models.py           # WorkflowAgent class
+├── models.py           # WorkflowAgent class (simplified)
 ├── workflow_agent.py   # Main execution script
-├── utils.py            # Utility functions
-├── prompts.py          # Prompt templates
-├── quick_test.py       # Quick testing script
+├── utils.py            # Utility functions (simplified)
+├── prompts.py          # Prompt templates (clean)
 ├── test_data.json      # Test dataset
-├── requirements.txt    # Dependencies
+├── requirements.txt    # Dependencies (minimal)
+├── tests/              # Test files directory
+│   ├── quick_test.py   # Quick testing script
+│   └── ...             # Other test files
 └── README.md          # This file
 ```
 
@@ -66,58 +86,120 @@ workflow_agent/
 ```bash
 python workflow_agent.py
 ```
-- Automatically processes all test cases from `test_data.json`
-- Runs both exact match and LLM evaluation simultaneously
-- Saves comprehensive results to Excel file
-- Displays summary statistics
+- Processes all test cases from `test_data.json`
+- Runs **three evaluation methods**:
+  1. **Exact Match** (with ground truth)
+  2. **LLM Evaluation** (with ground truth)  
+  3. **LLM-as-Judge** (no ground truth needed)
+- Saves comprehensive results to Excel
 
 ### Quick Test
 ```bash
-python quick_test.py
+python tests/quick_test.py
 ```
-- Tests single predefined instruction
-- Shows both ADK and JSON generation results
-- Displays both evaluation methods' results
-- Useful for quick verification
+- Tests single instruction
+- Shows JSON generation result
+- Demonstrates LLM-as-Judge evaluation
+- Perfect for quick verification
 
 ## 📊 Excel Output Format
 
-| Test_ID | Instruction | Expected_ADK | Generated_ADK | ADK_Exact_Match | ADK_LLM_Correct | Expected_JSON | Generated_JSON | JSON_Exact_Match | JSON_LLM_Correct | Total_Time | LLM_Eval_Time |
-|---------|-------------|--------------|---------------|-----------------|-----------------|---------------|----------------|------------------|------------------|------------|---------------|
-| 1 | (Agent1)로... | Sequential([...]) | Sequential([...]) | O | O | {...} | {...} | X | O | 1.2s | 0.8s |
+| Test_ID | Instruction | Expected_JSON | Generated_JSON | JSON_Exact_Match | JSON_LLM_with_GT | LLM_Judge_no_GT | Total_Time | Judge_Eval_Time |
+|---------|-------------|---------------|----------------|------------------|------------------|-----------------|------------|-----------------|
+| 1 | 고객 문의... | {...} | {...} | O | O | O | 1.2s | 0.8s |
 
 ## 🔍 Evaluation Methods
 
-### Exact Match
-- **ADK**: Perfect string matching
-- **JSON**: Type matching + agent set comparison (order-independent)
+### 1. Exact Match (with GT)
+- **Purpose**: Strict structural comparison
+- **Requires**: Ground truth test data
+- **Use case**: Precise validation against known correct answers
 
-### LLM Evaluation
-- **Semantic understanding**: Evaluates meaning and intent
-- **More flexible**: Handles variations in expression
-- **Context-aware**: Considers instruction requirements
+### 2. LLM Evaluation (with GT) 
+- **Purpose**: Semantic comparison with expected results
+- **Requires**: Ground truth test data
+- **Use case**: Flexible validation that understands meaning
+
+### 3. LLM-as-Judge (no GT needed) ⭐
+- **Purpose**: Evaluate if generation matches instruction intent
+- **Requires**: Only instruction and generated result
+- **Use case**: Real-world deployment where no ground truth exists
 
 ## 🛠️ Technical Details
 
-- **Language Model**: Ollama (qwen3:4b recommended)
+- **Language Models**: OpenAI GPT-4o and GPT-4o-mini
 - **Framework**: LangChain for LLM integration
-- **Output**: Excel files with openpyxl
-- **Code Style**: Clean, modular, well-documented
+- **Validation**: Simple JSON parsing + LLM semantic evaluation
+- **Output**: Excel files with comprehensive metrics
+- **Architecture**: Clean, modular, maintainable
 
 ## 📈 Performance Metrics
 
-The system provides comprehensive metrics:
-- **Accuracy**: Both exact and LLM evaluation percentages
-- **Timing**: Generation time vs evaluation time
-- **Detailed Results**: Per-test case breakdown
-- **Summary Statistics**: Overall performance overview
+The system provides three evaluation perspectives:
+- **Exact Match**: Structural accuracy percentage
+- **LLM+GT**: Semantic accuracy with ground truth
+- **LLM Judge**: Real-world applicability without ground truth
 
-## 🎯 Use Cases
+## 🎯 Key Benefits
 
-- **Workflow Design**: Convert natural language to structured workflows
-- **Multi-Agent Systems**: Define agent interactions and execution patterns
-- **Process Automation**: Specify sequential/parallel task execution
-- **AI Research**: Evaluate instruction-to-structure conversion quality
+1. **Simplified Codebase**: Removed complex Pydantic models
+2. **LLM-as-Judge**: No ground truth needed for evaluation
+3. **Production Ready**: Evaluate real instructions without test data
+4. **Comprehensive Metrics**: Multiple evaluation angles
+5. **Easy Maintenance**: Clean, readable code structure
+
+## 💡 Real-World Usage
+
+```python
+# For production use - no ground truth needed
+agent = WorkflowAgent()
+
+# Generate workflow from user instruction
+user_instruction = "사용자 입력을 처리하는 시스템 만들어줘"
+result = agent.generate_workflow(user_instruction)
+
+# Validate without ground truth
+is_good = agent.judge_instruction_result(
+    user_instruction, 
+    json.dumps(result["label_json"])
+)
+
+if is_good:
+    print("✅ Workflow generation successful!")
+    # Use the generated workflow
+else:
+    print("⚠️ May need regeneration or refinement")
+```
+
+## 🔧 Troubleshooting
+
+### API Key Issues
+```bash
+# Check if API key is set
+echo $OPENAI_API_KEY
+
+# Method 1: Create .env file (easiest)
+python create_env.py
+
+# Method 2: Manual .env file
+echo "OPENAI_API_KEY=your-key-here" > .env
+
+# Method 3: Environment variable
+export OPENAI_API_KEY="your-key-here"
+
+# Test without API key
+python demo_without_api.py
+```
+
+### Common Errors
+- **"api_key client option must be set"**: Run `python setup_api_key.py`
+- **"No test data found"**: Ensure `test_data.json` exists in root directory
+- **Import errors**: Run `pip install -r requirements.txt`
+
+### Getting API Key
+1. Visit [OpenAI Platform](https://platform.openai.com/api-keys)
+2. Create account and generate API key
+3. Set environment variable or use setup script
 
 ---
 

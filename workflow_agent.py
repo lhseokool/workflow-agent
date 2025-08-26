@@ -1,6 +1,6 @@
 """
 Workflow Agent - Clean and Simple Implementation
-Automatically runs JSON workflow generation and evaluation
+Runs both exact match evaluation (with GT) and LLM-as-Judge evaluation (no GT)
 """
 
 import json
@@ -10,9 +10,9 @@ from utils import load_test_data, compare_results_exact, save_to_excel, print_re
 
 
 def run_workflow_evaluation():
-    """Run JSON workflow evaluation on test data"""
+    """Run combined evaluation: exact match (GT) + LLM judge (no GT)"""
     print("🚀 Starting Workflow Agent Evaluation")
-    print("Running JSON workflow generation and evaluation...")
+    print("Running exact match (with GT) and LLM-as-Judge (no GT) evaluation...")
     
     # Load test data
     test_data = load_test_data()
@@ -24,7 +24,6 @@ def run_workflow_evaluation():
     
     # Initialize agent
     agent = WorkflowAgent()
-    print(f"💡 Using {'structured output' if agent.use_structured_output else 'string parsing'} for JSON generation")
     results = []
     
     # Process each test case
@@ -39,18 +38,27 @@ def run_workflow_evaluation():
             workflow_result = agent.generate_workflow(instruction)
             generation_time = time.time() - start_time
             
-            # Exact match evaluation
+            # 1. Exact match evaluation (with ground truth)
             exact_comparison = compare_results_exact(test_case, workflow_result)
             
-            # LLM evaluation (JSON only)
-            llm_start_time = time.time()
-            json_llm_correct = agent.evaluate_json_with_llm(
+            # 2. LLM-as-Judge evaluation (no ground truth needed)
+            judge_start_time = time.time()
+            llm_judge_correct = agent.judge_instruction_result(
                 instruction,
-                json.dumps(test_case.get("label_json", {}), ensure_ascii=False),
                 json.dumps(workflow_result.get("label_json", {}), ensure_ascii=False)
             )
-            llm_eval_time = time.time() - llm_start_time
-            total_time = generation_time + llm_eval_time
+            
+            # 3. LLM evaluation with ground truth (if available)
+            json_llm_correct = False
+            if "label_json" in test_case:
+                json_llm_correct = agent.evaluate_json_with_llm(
+                    instruction,
+                    json.dumps(test_case.get("label_json", {}), ensure_ascii=False),
+                    json.dumps(workflow_result.get("label_json", {}), ensure_ascii=False)
+                )
+            
+            judge_eval_time = time.time() - judge_start_time
+            total_time = generation_time + judge_eval_time
             
             # Store results
             result = {
@@ -58,38 +66,21 @@ def run_workflow_evaluation():
                 "instruction": instruction,
                 "expected_json": json.dumps(test_case.get("label_json", {}), ensure_ascii=False),
                 "actual_json": json.dumps(workflow_result.get("label_json", {}), ensure_ascii=False),
-                "json_match": exact_comparison["json_match"],
-                "json_llm_correct": json_llm_correct,
+                "json_exact_match": exact_comparison.get("json_match", False),
+                "json_llm_with_gt": json_llm_correct,
+                "llm_judge_no_gt": llm_judge_correct,
                 "elapsed_time": total_time,
-                "llm_eval_time": llm_eval_time,
-                "retry_count": workflow_result.get("retry_count", 0),
-                "success": workflow_result.get("success", True),
-                "validation_feedback": workflow_result.get("validation_feedback", ""),
-                # Pydantic validation results
-                "pydantic_valid": workflow_result.get("pydantic_valid", False),
-                "pydantic_error_type": workflow_result.get("pydantic_error_type", ""),
-                "llm_validation_score": workflow_result.get("llm_validation_score", False),
-                "parsing_method": "structured" if agent.use_structured_output and workflow_result.get("pydantic_valid", False) else "string"
+                "judge_eval_time": judge_eval_time
             }
             results.append(result)
             
             # Print progress
-            exact_json = "✅" if exact_comparison["json_match"] else "❌"
-            llm_json = "✅" if json_llm_correct else "❌"
-            success_icon = "✅" if workflow_result.get("success", True) else "❌"
-            pydantic_icon = "✅" if workflow_result.get("pydantic_valid", False) else "❌"
-            llm_semantic_icon = "✅" if workflow_result.get("llm_validation_score", False) else "❌"
-            retry_info = f" (Retries: {workflow_result.get('retry_count', 0)})" if workflow_result.get('retry_count', 0) > 0 else ""
+            exact_json = "✅" if exact_comparison.get("json_match", False) else "❌"
+            llm_gt = "✅" if json_llm_correct else "❌"
+            judge_no_gt = "✅" if llm_judge_correct else "❌"
             
-            # Show parsing method used
-            parsing_method = "🏗️(structured)" if agent.use_structured_output and workflow_result.get("pydantic_valid", False) else "📝(string)"
-            
-            print(f"Results - JSON: {exact_json}(exact) {llm_json}(LLM) | Validation: {pydantic_icon}(type) {llm_semantic_icon}(semantic) {success_icon}(overall) {parsing_method}{retry_info}")
-            print(f"Time: {total_time:.2f}s (Generation: {generation_time:.2f}s, Evaluation: {llm_eval_time:.2f}s)")
-            if workflow_result.get("validation_feedback"):
-                print(f"Feedback: {workflow_result['validation_feedback']}")
-            if workflow_result.get("pydantic_error_type") and workflow_result.get("pydantic_error_type") != "":
-                print(f"Type Error: {workflow_result['pydantic_error_type']}")
+            print(f"Results - Exact: {exact_json} | LLM+GT: {llm_gt} | Judge(no GT): {judge_no_gt}")
+            print(f"Time: {total_time:.2f}s (Generation: {generation_time:.2f}s, Judge: {judge_eval_time:.2f}s)")
             
         except Exception as e:
             print(f"❌ Error processing test case: {e}")
@@ -99,17 +90,11 @@ def run_workflow_evaluation():
                 "instruction": instruction,
                 "expected_json": json.dumps(test_case.get("label_json", {}), ensure_ascii=False),
                 "actual_json": "",
-                "json_match": False,
-                "json_llm_correct": False,
+                "json_exact_match": False,
+                "json_llm_with_gt": False,
+                "llm_judge_no_gt": False,
                 "elapsed_time": 0,
-                "llm_eval_time": 0,
-                "retry_count": 0,
-                "success": False,
-                "validation_feedback": f"Exception occurred: {str(e)}",
-                "pydantic_valid": False,
-                "pydantic_error_type": "exception",
-                "llm_validation_score": False,
-                "parsing_method": "error"
+                "judge_eval_time": 0
             })
     
     # Print summary and save results
