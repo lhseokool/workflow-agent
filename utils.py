@@ -1,113 +1,163 @@
 """
-Workflow Agent Utilities
-Simple functions for loading test data, comparing results, and saving to Excel
+Utility functions for workflow agent
+워크플로우 에이전트용 유틸리티 함수들
 """
 
 import json
-import pandas as pd
-from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, Union
 
 
-def load_test_data(file_path: str = "test_data.json") -> List[Dict[str, Any]]:
-    """Load test data from JSON file"""
+def parse_llm_evaluation(evaluation_result: str) -> bool:
+    """
+    LLM 평가 결과를 파싱하여 boolean으로 변환
+    
+    Args:
+        evaluation_result (str): LLM에서 반환된 평가 결과 문자열
+        
+    Returns:
+        bool: True if evaluation passed, False otherwise
+    """
+    if not evaluation_result:
+        return False
+    
+    # Clean up the result string
+    result = evaluation_result.strip().lower()
+    
+    # Check for positive indicators
+    positive_indicators = ["true", "yes", "pass", "correct", "good", "valid"]
+    negative_indicators = ["false", "no", "fail", "incorrect", "bad", "invalid"]
+    
+    for indicator in positive_indicators:
+        if indicator in result:
+            return True
+    
+    for indicator in negative_indicators:
+        if indicator in result:
+            return False
+    
+    # Default to False if unclear
+    return False
+
+
+def validate_json_structure(json_data: Union[str, Dict[str, Any]]) -> bool:
+    """
+    JSON 구조가 올바른지 검증
+    
+    Args:
+        json_data: JSON 문자열 또는 딕셔너리
+        
+    Returns:
+        bool: True if valid, False otherwise
+    """
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"Failed to load test data: {e}")
-        return []
+        # If string, try to parse as JSON
+        if isinstance(json_data, str):
+            parsed_data = json.loads(json_data)
+        else:
+            parsed_data = json_data
+        
+        # Check required fields
+        if not isinstance(parsed_data, dict):
+            return False
+        
+        # Check for required fields based on type
+        if "type" not in parsed_data:
+            return False
+        
+        workflow_type = parsed_data.get("type")
+        
+        # Type-specific validation
+        if workflow_type == "LLM":
+            return "tools" in parsed_data
+        elif workflow_type in ["Sequential", "Parallel", "Loop"]:
+            return "sub_agents" in parsed_data
+        
+        return True
+        
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return False
 
 
-def compare_results_exact(expected: Dict[str, Any], actual: Dict[str, Any]) -> Dict[str, bool]:
-    """Compare results using exact matching for JSON workflows"""
-    expected_json = expected.get("label_json", {})
-    actual_json = actual.get("label_json", {})
+def clean_json_output(raw_output: str) -> str:
+    """
+    LLM 출력에서 JSON 부분만 추출하여 정리
     
-    # Simple exact match comparison
-    json_match = expected_json == actual_json
+    Args:
+        raw_output (str): LLM의 원시 출력
+        
+    Returns:
+        str: 정리된 JSON 문자열
+    """
+    if not raw_output:
+        return "{}"
     
+    # Remove common prefixes/suffixes
+    output = raw_output.strip()
+    
+    # Remove markdown code blocks
+    if output.startswith("```"):
+        lines = output.split('\n')
+        output = '\n'.join(lines[1:-1]) if len(lines) > 2 else output
+    
+    # Remove json prefix
+    if output.startswith("json"):
+        output = output[4:].strip()
+    
+    # Find JSON object boundaries
+    start_idx = output.find('{')
+    end_idx = output.rfind('}')
+    
+    if start_idx != -1 and end_idx != -1 and start_idx <= end_idx:
+        output = output[start_idx:end_idx + 1]
+    
+    return output
+
+
+def extract_agent_names(instruction: str) -> list:
+    """
+    지시문에서 {AgentName} 형태의 Agent 이름들을 추출
+    
+    Args:
+        instruction (str): 입력 지시문
+        
+    Returns:
+        list: 추출된 Agent 이름들의 리스트
+    """
+    import re
+    
+    # Find all {AgentName} patterns
+    pattern = r'\{([^}]+Agent)\}'
+    matches = re.findall(pattern, instruction)
+    
+    return matches
+
+
+def format_workflow_result(
+    instruction: str,
+    generated_json: Dict[str, Any],
+    model_type: str = "unknown",
+    retry_attempts: int = 0,
+    execution_time: float = 0.0
+) -> Dict[str, Any]:
+    """
+    워크플로우 생성 결과를 표준 형식으로 포맷팅
+    
+    Args:
+        instruction: 원본 지시문
+        generated_json: 생성된 JSON 워크플로우
+        model_type: 모델 타입
+        retry_attempts: 재시도 횟수
+        execution_time: 실행 시간
+        
+    Returns:
+        Dict: 표준화된 결과 딕셔너리
+    """
     return {
-        "json_match": json_match,
-        "exact_match": json_match
+        "instruction": instruction,
+        "label_json": generated_json,
+        "model_type": model_type,
+        "retry_attempts": retry_attempts,
+        "execution_time": execution_time,
+        "extracted_agents": extract_agent_names(instruction),
+        "is_valid": validate_json_structure(generated_json)
     }
-
-
-def parse_llm_evaluation(eval_result: str) -> bool:
-    """Parse LLM evaluation result (True/False only)"""
-    result = eval_result.strip().lower()
-    return result == "true"
-
-
-def save_to_excel(results: List[Dict[str, Any]], prefix: str = "evaluation") -> str:
-    """Save results to Excel file with exact match, LLM+GT, and LLM judge (no GT) results"""
-    try:
-        excel_data = []
-        for r in results:
-            row = {
-                "Test_ID": r["test_id"],
-                "Instruction": r["instruction"],
-                "Expected_JSON": r["expected_json"],
-                "Generated_JSON": r["actual_json"],
-                "JSON_Exact_Match": "O" if r.get("json_exact_match", False) else "X",
-                "JSON_LLM_with_GT": "O" if r.get("json_llm_with_gt", False) else "X",
-                "LLM_Judge_no_GT": "O" if r.get("llm_judge_no_gt", False) else "X",
-                "Total_Time": f"{r['elapsed_time']:.2f}s",
-                "Judge_Eval_Time": f"{r.get('judge_eval_time', 0):.2f}s"
-            }
-            excel_data.append(row)
-        
-        # Save to Excel
-        df = pd.DataFrame(excel_data)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"workflow_results_{prefix}_{timestamp}.xlsx"
-        
-        with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-            df.to_excel(writer, sheet_name='Results', index=False)
-            
-            # Auto-adjust column widths
-            worksheet = writer.sheets['Results']
-            for column in worksheet.columns:
-                max_length = 0
-                column_letter = column[0].column_letter
-                for cell in column:
-                    try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
-                    except:
-                        pass
-                adjusted_width = min(max_length + 2, 50)
-                worksheet.column_dimensions[column_letter].width = adjusted_width
-        
-        return filename
-    except Exception as e:
-        print(f"❌ Excel save failed: {e}")
-        return ""
-
-
-def print_results_summary(results: List[Dict[str, Any]]):
-    """Print test results summary with exact match, LLM+GT, and LLM judge metrics"""
-    total_tests = len(results)
-    if total_tests == 0:
-        print("❌ No test results available.")
-        return
-    
-    avg_time = sum(r["elapsed_time"] for r in results) / total_tests
-    avg_judge_time = sum(r.get("judge_eval_time", 0) for r in results) / total_tests
-    
-    # Calculate metrics
-    json_exact = sum(1 for r in results if r.get("json_exact_match", False))
-    json_llm_gt = sum(1 for r in results if r.get("json_llm_with_gt", False))
-    llm_judge = sum(1 for r in results if r.get("llm_judge_no_gt", False))
-    
-    print(f"\n{'='*70}")
-    print(f"📊 Test Results Summary")
-    print(f"{'='*70}")
-    print(f"Total Tests: {total_tests}")
-    print(f"\nEvaluation Results:")
-    print(f"  Exact Match (with GT):     {json_exact}/{total_tests} ({json_exact/total_tests*100:.1f}%)")
-    print(f"  LLM Eval (with GT):        {json_llm_gt}/{total_tests} ({json_llm_gt/total_tests*100:.1f}%)")
-    print(f"  LLM Judge (no GT needed):  {llm_judge}/{total_tests} ({llm_judge/total_tests*100:.1f}%)")
-    print(f"\nTiming:")
-    print(f"  Average Total Time:   {avg_time:.2f}s")
-    print(f"  Average Judge Time:   {avg_judge_time:.2f}s")
