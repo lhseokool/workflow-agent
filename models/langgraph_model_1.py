@@ -5,6 +5,7 @@ LangGraph의 conditional edge를 이용한 retry 로직
 
 import json
 import os
+import time
 from typing import Dict, Any, TypedDict, Annotated
 from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import StrOutputParser
@@ -24,7 +25,7 @@ except ImportError:
 # Import prompts and utils from parent directory
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from prompts import JSON_PROMPT, INSTRUCTION_JUDGE_PROMPT
+from prompts import JSON_PROMPT, LLM_JUDGE_WITH_REASEON_PROMPT
 from utils import parse_llm_evaluation
 
 
@@ -35,6 +36,7 @@ class WorkflowState(TypedDict):
     retry_count: int
     max_retries: int
     judge_passed: bool
+    judge_reason: str
     success: bool
     error_message: str
 
@@ -60,25 +62,29 @@ class LangGraphRetryAgent:
         
         # Chains
         self.json_chain = ChatPromptTemplate.from_template(JSON_PROMPT) | self.llm | self.parser
-        self.judge_chain = ChatPromptTemplate.from_template(INSTRUCTION_JUDGE_PROMPT) | self.llm | self.parser
+        self.judge_chain = ChatPromptTemplate.from_template(LLM_JUDGE_WITH_REASEON_PROMPT) | self.llm | self.parser
         
         # Build LangGraph
         self.graph = self._build_graph()
     
     def _generate_json_node(self, state: WorkflowState) -> Dict[str, Any]:
         """JSON 생성 노드"""
+        start_time = time.time()
         try:
             instruction = state["instruction"]
             result = self.json_chain.invoke({"instruction": instruction})
             generated_json = json.loads(result.strip())
+            
+            elapsed_time = time.time() - start_time
+            print(f"⚙️ JSON Generated ({elapsed_time:.2f}s)")
             
             return {
                 "generated_json": generated_json,
                 "error_message": ""
             }
         except json.JSONDecodeError as e:
-            print(f"JSON parsing error: {e}")
-            print(f"Raw output: {result}")
+            elapsed_time = time.time() - start_time
+            print(f"❌ JSON Parse Error ({elapsed_time:.2f}s)")
             # Return fallback JSON structure
             fallback_json = {"type": "LLM", "sub_agents": [{"name": "DefaultAgent"}]}
             return {
@@ -86,7 +92,8 @@ class LangGraphRetryAgent:
                 "error_message": f"JSON generation error: {str(e)}"
             }
         except Exception as e:
-            print(f"JSON generation error: {e}")
+            elapsed_time = time.time() - start_time
+            print(f"❌ JSON Generation Error ({elapsed_time:.2f}s)")
             # Return fallback JSON structure
             fallback_json = {"type": "LLM", "sub_agents": [{"name": "DefaultAgent"}]}
             return {
@@ -96,34 +103,50 @@ class LangGraphRetryAgent:
     
     def _judge_node(self, state: WorkflowState) -> Dict[str, Any]:
         """Judge 평가 노드"""
+        start_time = time.time()
         try:
-            instruction = state["instruction"]
-            generated_json = state["generated_json"]
-            json_string = json.dumps(generated_json, ensure_ascii=False)
-            
+            # Judge 체인 실행
             result = self.judge_chain.invoke({
-                "instruction": instruction,
-                "generated_json": json_string
+                "instruction": state["instruction"],
+                "generated_json": json.dumps(state["generated_json"], ensure_ascii=False)
             })
             
-            judge_passed = parse_llm_evaluation(result)
+            # Judge 결과 파싱
+            try:
+                judge_result = json.loads(result.strip())
+                judge_passed = judge_result.get("passed", False)
+                judge_reason = judge_result.get("reason", "No reason provided")
+            except json.JSONDecodeError:
+                # Fallback parsing
+                judge_passed = parse_llm_evaluation(result)
+                judge_reason = f"Simple evaluation result: {result.strip()}"
             
-            if judge_passed:
-                return {
-                    "judge_passed": True,
-                    "success": True
-                }
-            else:
-                return {
-                    "judge_passed": False,
-                    "success": False,
-                    "retry_count": state["retry_count"] + 1
-                }
+            elapsed_time = time.time() - start_time
+            status = "✅ PASSED" if judge_passed else "❌ FAILED"
+            print(f"{status} Judge Evaluation ({elapsed_time:.2f}s)")
+            
+            # 실패 시 이유 출력
+            if not judge_passed:
+                print(f"   Reason: {judge_reason}")
+            
+            return {
+                "judge_passed": judge_passed,
+                "judge_reason": judge_reason,
+                "success": judge_passed,
+                "retry_count": state["retry_count"] + (0 if judge_passed else 1)
+            }
+            
         except Exception as e:
+            elapsed_time = time.time() - start_time
+            error_reason = f"Judge error: {str(e)}"
+            print(f"❌ Judge Error ({elapsed_time:.2f}s)")
+            print(f"   Reason: {error_reason}")
             return {
                 "judge_passed": False,
+                "judge_reason": error_reason,
                 "success": False,
-                "error_message": f"Judge error: {str(e)}"
+                "retry_count": state["retry_count"] + 1,
+                "error_message": error_reason
             }
     
     def _should_retry(self, state: WorkflowState) -> str:
@@ -134,12 +157,12 @@ class LangGraphRetryAgent:
         
         # 최대 retry 도달했으면 종료
         if state["retry_count"] >= state["max_retries"]:
+            print(f"⚠️ Max retries reached ({state['max_retries']})")
             return "end"
         
         # retry 계속
+        print(f"🔄 Retry {state['retry_count']}/{state['max_retries']}")
         return "retry"
-    
-    # increment_retry 노드 제거: judge 노드에서 실패 시 retry_count를 증가시킵니다.
     
     def _build_graph(self) -> StateGraph:
         """LangGraph 구성"""
@@ -167,26 +190,32 @@ class LangGraphRetryAgent:
         return workflow.compile()
     
     def generate_workflow(self, instruction: str) -> Dict[str, Any]:
-        """
-        Generate workflow using LangGraph conditional edges
-        """
-        # 초기 상태
+        """LangGraph conditional edges를 사용한 워크플로우 생성"""
+        total_start_time = time.time()
+        
+        # 초기 상태 설정
         initial_state = {
             "instruction": instruction,
             "generated_json": {},
             "retry_count": 0,
             "max_retries": self.max_retries,
             "judge_passed": False,
+            "judge_reason": "",
             "success": False,
             "error_message": ""
         }
         
-        # LangGraph 실행
+        print(f"🚀 LangGraph Conditional Workflow")
+        print(f"📝 {instruction}")
+        print("-" * 60)
+        
         try:
-            result = self.graph.invoke(initial_state)
+            # LangGraph 실행
+            final_state = self.graph.invoke(initial_state)
+            total_time = time.time() - total_start_time
             
-            # 최종 상태에서 결과 추출
-            final_state = result["judge"] if "judge" in result else result
+            print("-" * 60)
+            print(f"🎯 Total Time: {total_time:.2f}s")
             
             return {
                 "instruction": instruction,
@@ -195,10 +224,14 @@ class LangGraphRetryAgent:
                 "retry_attempts": final_state["retry_count"],
                 "success": final_state["success"],
                 "judge_passed": final_state["judge_passed"],
-                "error_message": final_state.get("error_message", "")
+                "judge_reason": final_state.get("judge_reason", ""),
+                "error_message": final_state.get("error_message", ""),
+                "total_time": total_time
             }
             
         except Exception as e:
+            total_time = time.time() - total_start_time
+            print(f"❌ Graph Error: {str(e)} ({total_time:.2f}s)")
             return {
                 "instruction": instruction,
                 "label_json": {"type": "LLM", "sub_agents": [{"name": "DefaultAgent"}]},
@@ -206,7 +239,9 @@ class LangGraphRetryAgent:
                 "retry_attempts": 0,
                 "success": False,
                 "judge_passed": False,
-                "error_message": f"Graph execution error: {str(e)}"
+                "judge_reason": "Graph execution failed",
+                "error_message": f"Graph execution error: {str(e)}",
+                "total_time": total_time
             }
     
     def save_graph_as_png(self, output_dir: str = "./models") -> str:
@@ -268,58 +303,34 @@ def test_langgraph_conditional():
     print("🧪 Testing LangGraph Conditional Edge Model")
     print("="*60)
     
-    # Initialize model
+    # 모델 초기화
     model = LangGraphRetryAgent(max_retries=2)
     
-    # Save LangGraph as PNG image
-    print("📊 Saving LangGraph workflow as PNG image...")
-    saved_png = model.save_graph_as_png()
-    if saved_png:
-        print(f"✅ Graph saved as PNG: {saved_png}")
-    
-    # Optional: Display the graph (uncomment if you want to show image)
-    # model.display_graph()
-    
-    # Test instruction (baseline과 동일한 테스트 케이스로 변경)
+    # 테스트 지시사항
     test_instruction = "콘텐츠 제작을 효율적으로 하는 시스템을 구축해줘. {텍스트작성Agent}, {이미지생성Agent}, {동영상편집Agent}가 동시에 작업하고 {콘텐츠통합Agent}가 최종 결과물을 만들도록 해"
     
-    print(f"📝 Test Instruction: {test_instruction}")
-    print("-"*60)
-    
-    # Generate workflow
+    # 워크플로우 생성
     result = model.generate_workflow(test_instruction)
     
-    # Display results (baseline과 유사한 형식으로 변경)
-    print(f"✅ Model Type: {result['model_type']}")
-    print(f"🔢 Retry Attempts: {result['retry_attempts']}")
-    print(f"🎯 Success: {result['success']}")
-    print(f"⚖️ Judge Passed: {result['judge_passed']}")
+    # 결과 출력
+    print(f"\n🎯 Results:")
+    print(f"   Success: {result['success']} | Judge: {result['judge_passed']} | Retries: {result['retry_attempts']} | Time: {result.get('total_time', 0):.2f}s")
+    
+    # 실패 시 이유 출력
+    if not result['success'] or not result['judge_passed']:
+        print(f"   ❌ Reason: {result.get('judge_reason', 'N/A')}")
     
     if result.get('error_message'):
-        print(f"⚠️ Error Message: {result['error_message']}")
+        print(f"   ⚠️ Error: {result['error_message']}")
     
-    print(f"📄 Generated JSON:")
+    print(f"\n📄 Generated JSON:")
     print(json.dumps(result['label_json'], ensure_ascii=False, indent=2))
     
-    # Model info
-    info = model.get_model_info()
-    print(f"\n📋 Model Info:")
-    for key, value in info.items():
-        print(f"  {key}: {value}")
-    
-    # 성능 분석
-    print(f"\n🎯 Performance Analysis:")
+    # 성능 요약
     if result['success'] and result['judge_passed']:
-        print("🎉 Perfect! LangGraph conditional edge worked successfully!")
-        if result['retry_attempts'] == 0:
-            print("✨ Generated correct result on first attempt!")
-        else:
-            print(f"🔄 Required {result['retry_attempts']} retries to pass judge evaluation")
-    elif result['retry_attempts'] >= model.max_retries:
-        print("⚠️ Reached maximum retries without passing judge evaluation")
-        print("🔧 Consider adjusting prompts or increasing max_retries")
+        print(f"\n✅ SUCCESS - Judge validation passed!")
     else:
-        print("❌ Workflow failed before reaching max retries")
+        print(f"\n❌ FAILED - Check judge validation or increase retries")
 
 
 if __name__ == "__main__":
