@@ -3,6 +3,8 @@ Workflow Agent Prompts
 Simple prompt templates for JSON generation and evaluation
 """
 
+
+
 # JSON Generation Prompt
 JSON_PROMPT = """
 Analyze the Korean instruction and generate a workflow JSON. Return ONLY the JSON object, no explanations or additional text.

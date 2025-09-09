@@ -227,7 +227,7 @@ class ThreeStageWorkflowAgent:
             print(f"⚠️ Max retries reached ({state['max_retries']})")
             return "end"
         
-        # retry 계속 (타입 예측부터 다시 시작)
+        # retry 계속 (워크플로우 생성부터 다시 시작)
         print(f"🔄 Retry {state['retry_count']}/{state['max_retries']}")
         return "retry"
     
@@ -269,7 +269,7 @@ class ThreeStageWorkflowAgent:
             "validate_workflow",
             self._should_retry,
             {
-                "retry": "predict_type",  # 실패 시 처음부터 다시 시작
+                "retry": "generate_workflow",  # 실패 시 generate_workflow부터 다시 시작
                 "end": END
             }
         )
@@ -279,9 +279,20 @@ class ThreeStageWorkflowAgent:
         
         return workflow.compile()
     
-    def generate_workflow(self, instruction: str) -> Dict[str, Any]:
-        """3단계 프로세스를 사용한 워크플로우 생성"""
+    def generate_workflow(self, instruction: str, save_graph: bool = False) -> Dict[str, Any]:
+        """3단계 프로세스를 사용한 워크플로우 생성
+        
+        Args:
+            instruction: 워크플로우 생성 지시사항
+            save_graph: 그래프를 PNG로 저장할지 여부
+        """
         total_start_time = time.time()
+        
+        # 그래프 저장 (옵션)
+        if save_graph:
+            png_path = self.save_graph_as_png()
+            if png_path:
+                print(f"📊 Workflow graph saved: {png_path}")
         
         # 초기 상태 설정
         initial_state = {
@@ -394,6 +405,14 @@ def test_three_stage_workflow():
     # 모델 초기화
     model = ThreeStageWorkflowAgent(max_retries=2)
     
+    # 그래프 시각화 저장
+    print("📊 Saving workflow graph...")
+    png_path = model.save_graph_as_png()
+    if png_path:
+        print(f"✅ Graph saved: {png_path}")
+    else:
+        print("⚠️ Graph saving failed, but continuing with test...")
+    
     # 테스트 지시사항
     test_instruction = "콘텐츠 제작을 효율적으로 하는 시스템을 구축해줘. {텍스트작성Agent}, {이미지생성Agent}, {동영상편집Agent}가 동시에 작업하고 {콘텐츠통합Agent}가 최종 결과물을 만들도록 해"
     
@@ -421,5 +440,32 @@ def test_three_stage_workflow():
         print(f"\n❌ FAILED - Check validation logic or increase retries")
 
 
+def test_graph_saving():
+    """그래프 저장만 테스트"""
+    print("🧪 Testing Graph Saving Only")
+    print("="*50)
+    
+    try:
+        # 모델 초기화
+        model = ThreeStageWorkflowAgent()
+        
+        # 그래프 저장 테스트
+        print("📊 Testing graph saving...")
+        result_path = model.save_graph_as_png()
+        
+        if result_path:
+            print(f"✅ SUCCESS: Graph saved to {result_path}")
+        else:
+            print("❌ FAILED: Graph saving failed")
+            
+    except Exception as e:
+        print(f"❌ ERROR: {e}")
+
+
 if __name__ == "__main__":
-    test_three_stage_workflow()
+    import sys
+    
+    if len(sys.argv) > 1 and sys.argv[1] == "--test-graph":
+        test_graph_saving()
+    else:
+        test_three_stage_workflow()
