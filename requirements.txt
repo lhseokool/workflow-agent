@@ -1,0 +1,24 @@
+# Core dependencies
+langchain>=0.3.7,<0.4
+langchain-openai>=0.2.11,<0.3
+langchain-core>=0.3.19,<0.4
+langgraph>=0.2.0
+openai>=1.54,<2
+pydantic>=2.8,<3
+python-dotenv==1.0.0
+
+# Data processing
+pandas==2.2.1
+openpyxl==3.1.2
+
+# HTTP client
+httpx>=0.25.0
+
+# Graph visualization (optional)
+Pillow>=10.0.0
+pydot>=1.4.2
+
+
+
+
+
